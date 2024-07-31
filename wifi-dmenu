@@ -1,0 +1,104 @@
+#!/bin/sh
+
+# wifi tool for dmenu by Nicklas Rudolfsson
+# https://github.com/nirucon
+
+IFS=$'\n'
+
+# Check if FontAwesome is installed
+if fc-list | grep -qi "FontAwesome"; then
+    ICON_DEVICE_NOT_FOUND=""  # FontAwesome icon for 'unlink'
+    ICON_SCANNING=""          # FontAwesome icon for 'search'
+    ICON_AP_NOT_FOUND=""      # FontAwesome icon for 'exclamation-triangle'
+    ICON_CONNECTING=""       # FontAwesome icon for 'wifi'
+    ICON_CONNECTION_FAILED="" # FontAwesome icon for 'exclamation-circle'
+    ICON_CONNECTED=""        # FontAwesome icon for 'check-circle'
+else
+    ICON_DEVICE_NOT_FOUND="Device not found"
+    ICON_SCANNING="Scanning"
+    ICON_AP_NOT_FOUND="Access point not found"
+    ICON_CONNECTING="Connecting"
+    ICON_CONNECTION_FAILED="Connection failed"
+    ICON_CONNECTED="Connected"
+fi
+
+get_connection() {
+    nmcli -g UUID,connection.interface-name,802-11-wireless.ssid c | while IFS=: read -r uuid iface ssid; do
+        if [ "$iface" = "$1" ] && [ "$ssid" = "$2" ]; then
+            echo "$uuid"
+            return
+        fi
+    done
+}
+
+# Animation function for scanning
+animate_scanning() {
+    local i=0
+    local delay=0.2
+    local frames=("${ICON_SCANNING} Scanning." "${ICON_SCANNING} Scanning.." "${ICON_SCANNING} Scanning...")
+    while true; do
+        echo "${frames[i]}"
+        i=$(( (i + 1) % 3 ))
+        sleep $delay
+    done
+}
+
+# Get available WiFi devices
+readarray -t devices <<< $(nmcli -t -f DEVICE,TYPE d | grep ':wifi' | cut -d: -f1)
+
+if [ ${#devices[@]} -eq 0 ]; then
+    dstatus n 2 "$ICON_DEVICE_NOT_FOUND"
+    exit
+fi
+
+if [ ${#devices[@]} -eq 1 ]; then
+    device=${devices[0]}
+else
+    device=$(printf "%s\n" "${devices[@]}" | dmenu -p "Choose your Wi-Fi card to start scanning:" "$@")
+fi
+
+[ -z "$device" ] && exit
+
+# Start the animation in the background and scan for Wi-Fi networks
+animate_scanning | dmenu -p "Scanning..." &
+animation_pid=$!
+readarray -t access_points <<< $(nmcli -t -f SSID d wifi list --rescan yes ifname "$device")
+kill $animation_pid
+wait $animation_pid 2>/dev/null
+
+if [ ${#access_points[@]} -eq 0 ]; then
+    dstatus n 2 "$ICON_AP_NOT_FOUND"
+    exit
+fi
+
+access_point=$(printf "%s\n" "${access_points[@]}" | dmenu -p "Choose Wi-Fi ESSID:" "$@")
+[ -z "$access_point" ] && exit
+
+connection=$(get_connection "$device" "$access_point")
+
+if [ "$connection" ]; then
+    dstatus n 5 "$ICON_CONNECTING ($access_point)"
+    if nmcli c up uuid "$connection" 2>&1 | grep -q "Error"; then
+        dstatus n 2 "$ICON_CONNECTION_FAILED"
+    else
+        dstatus u 2 "$ICON_CONNECTED ($access_point)"
+    fi
+    exit
+fi
+
+password=$(dmenu -p "Enter Password for $access_point:" "$@")
+dstatus n 5 "$ICON_CONNECTING ($access_point)"
+if [ "$password" ]; then
+    ret=$(nmcli d wifi connect "$access_point" password "$password" ifname "$device" 2>&1)
+else
+    ret=$(nmcli d wifi connect "$access_point" ifname "$device" 2>&1)
+fi
+
+if echo "$ret" | grep -q "Error"; then
+    dstatus n 2 "$ICON_CONNECTION_FAILED"
+    if connection=$(get_connection "$device" "$access_point"); then
+        nmcli c delete "$connection"
+    fi
+else
+    dstatus u 2 "$ICON_CONNECTED ($access_point)"
+fi
