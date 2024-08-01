@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# wifi tool for dmenu by Nicklas Rudolfsson
+# WiFi tool for dmenu by Nicklas Rudolfsson
 # https://github.com/nirucon
 
 IFS=$'\n'
@@ -24,10 +24,7 @@ fi
 
 get_connection() {
     nmcli -g UUID,connection.interface-name,802-11-wireless.ssid c | while IFS=: read -r uuid iface ssid; do
-        if [ "$iface" = "$1" ] && [ "$ssid" = "$2" ]; then
-            echo "$uuid"
-            return
-        fi
+        [ "$iface" = "$1" ] && [ "$ssid" = "$2" ] && echo "$uuid" && return
     done
 }
 
@@ -44,40 +41,35 @@ animate_scanning() {
 }
 
 # Get available WiFi devices
-readarray -t devices <<< $(nmcli -t -f DEVICE,TYPE d | grep ':wifi' | cut -d: -f1)
+devices=$(nmcli -t -f DEVICE,TYPE d | grep ':wifi' | cut -d: -f1)
 
-if [ ${#devices[@]} -eq 0 ]; then
+if [ -z "$devices" ]; then
     dstatus n 2 "$ICON_DEVICE_NOT_FOUND"
     exit
 fi
 
-if [ ${#devices[@]} -eq 1 ]; then
-    device=${devices[0]}
-else
-    device=$(printf "%s\n" "${devices[@]}" | dmenu -p "Choose your Wi-Fi card to start scanning:" "$@")
-fi
-
+device=$(printf "%s\n" "$devices" | dmenu -p "Choose your Wi-Fi card to start scanning:" "$@")
 [ -z "$device" ] && exit
 
 # Start the animation in the background and scan for Wi-Fi networks
 animate_scanning | dmenu -p "Scanning..." &
 animation_pid=$!
-readarray -t access_points <<< $(nmcli -t -f SSID d wifi list --rescan yes ifname "$device")
+access_points=$(nmcli -t -f SSID d wifi list --rescan yes ifname "$device")
 kill $animation_pid
 wait $animation_pid 2>/dev/null
 
-if [ ${#access_points[@]} -eq 0 ]; then
+if [ -z "$access_points" ]; then
     dstatus n 2 "$ICON_AP_NOT_FOUND"
     exit
 fi
 
-access_point=$(printf "%s\n" "${access_points[@]}" | dmenu -p "Choose Wi-Fi ESSID:" "$@")
+access_point=$(printf "%s\n" "$access_points" | dmenu -p "Choose Wi-Fi ESSID:" "$@")
 [ -z "$access_point" ] && exit
 
 connection=$(get_connection "$device" "$access_point")
 
+dstatus n 5 "$ICON_CONNECTING ($access_point)"
 if [ "$connection" ]; then
-    dstatus n 5 "$ICON_CONNECTING ($access_point)"
     if nmcli c up uuid "$connection" 2>&1 | grep -q "Error"; then
         dstatus n 2 "$ICON_CONNECTION_FAILED"
     else
@@ -87,7 +79,6 @@ if [ "$connection" ]; then
 fi
 
 password=$(dmenu -p "Enter Password for $access_point:" "$@")
-dstatus n 5 "$ICON_CONNECTING ($access_point)"
 if [ "$password" ]; then
     ret=$(nmcli d wifi connect "$access_point" password "$password" ifname "$device" 2>&1)
 else
@@ -96,9 +87,7 @@ fi
 
 if echo "$ret" | grep -q "Error"; then
     dstatus n 2 "$ICON_CONNECTION_FAILED"
-    if connection=$(get_connection "$device" "$access_point"); then
-        nmcli c delete "$connection"
-    fi
+    connection=$(get_connection "$device" "$access_point") && nmcli c delete "$connection"
 else
     dstatus u 2 "$ICON_CONNECTED ($access_point)"
 fi
