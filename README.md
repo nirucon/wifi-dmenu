@@ -69,4 +69,4 @@ Run the script from your terminal:
 
 ## License
 
-Do what you want! Feel free to buy me a coffee ;)
+Feel free to use and modify, donate if you want :) https://www.paypal.com/paypalme/nicklasrudolfsson
