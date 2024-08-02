@@ -1,7 +1,15 @@
 #!/bin/sh
 
-# WiFi tool for dmenu by Nicklas Rudolfsson
+# WiFi connect for dmenu by Nicklas Rudolfsson
 # https://github.com/nirucon
+
+# Dependencies:
+# Arch Linux:
+#   sudo pacman -S networkmanager dmenu ttf-font-awesome mpv libnotify
+# Void Linux:
+#   sudo xbps-install -S NetworkManager dmenu font-awesome5 mpv libnotify
+# Debian-based:
+#   sudo apt install network-manager dmenu fonts-font-awesome mpv libnotify-bin
 
 IFS=$'\n'
 
@@ -40,15 +48,23 @@ animate_scanning() {
     done
 }
 
+# Check if required tools are installed
+for cmd in nmcli dmenu; do
+    if ! command -v $cmd >/dev/null 2>&1; then
+        echo "$cmd is required but not installed. Exiting."
+        exit 1
+    fi
+done
+
 # Get available WiFi devices
 devices=$(nmcli -t -f DEVICE,TYPE d | grep ':wifi' | cut -d: -f1)
 
 if [ -z "$devices" ]; then
-    dstatus n 2 "$ICON_DEVICE_NOT_FOUND"
-    exit
+    notify-send -u critical "$ICON_DEVICE_NOT_FOUND" "No Wi-Fi device found"
+    exit 1
 fi
 
-device=$(printf "%s\n" "$devices" | dmenu -p "Choose your Wi-Fi card to start scanning:" "$@")
+device=$(printf "%s\n" "$devices" | dmenu -p "Choose your Wi-Fi card to start scanning:")
 [ -z "$device" ] && exit
 
 # Start the animation in the background and scan for Wi-Fi networks
@@ -59,26 +75,26 @@ kill $animation_pid
 wait $animation_pid 2>/dev/null
 
 if [ -z "$access_points" ]; then
-    dstatus n 2 "$ICON_AP_NOT_FOUND"
-    exit
+    notify-send -u critical "$ICON_AP_NOT_FOUND" "No access points found"
+    exit 1
 fi
 
-access_point=$(printf "%s\n" "$access_points" | dmenu -p "Choose Wi-Fi ESSID:" "$@")
+access_point=$(printf "%s\n" "$access_points" | dmenu -p "Choose Wi-Fi ESSID:")
 [ -z "$access_point" ] && exit
 
 connection=$(get_connection "$device" "$access_point")
 
-dstatus n 5 "$ICON_CONNECTING ($access_point)"
+notify-send -u normal "$ICON_CONNECTING" "Connecting to $access_point"
 if [ "$connection" ]; then
     if nmcli c up uuid "$connection" 2>&1 | grep -q "Error"; then
-        dstatus n 2 "$ICON_CONNECTION_FAILED"
+        notify-send -u critical "$ICON_CONNECTION_FAILED" "Connection failed"
     else
-        dstatus u 2 "$ICON_CONNECTED ($access_point)"
+        notify-send -u normal "$ICON_CONNECTED" "Connected to $access_point"
     fi
     exit
 fi
 
-password=$(dmenu -p "Enter Password for $access_point:" "$@")
+password=$(dmenu -p "Enter Password for $access_point:")
 if [ "$password" ]; then
     ret=$(nmcli d wifi connect "$access_point" password "$password" ifname "$device" 2>&1)
 else
@@ -86,8 +102,8 @@ else
 fi
 
 if echo "$ret" | grep -q "Error"; then
-    dstatus n 2 "$ICON_CONNECTION_FAILED"
+    notify-send -u critical "$ICON_CONNECTION_FAILED" "Connection failed"
     connection=$(get_connection "$device" "$access_point") && nmcli c delete "$connection"
 else
-    dstatus u 2 "$ICON_CONNECTED ($access_point)"
+    notify-send -u normal "$ICON_CONNECTED" "Connected to $access_point"
 fi
